@@ -100,59 +100,107 @@ export const OcrVerificationView: React.FC<OcrVerificationViewProps> = ({
     setter(next.toFixed(precision));
   };
 
+  // Helper: optimize and scale image on client side before upload (prevents Vercel 4.5MB payload limit & speeds up inference)
+  const optimizeImageForOcr = (file: File): Promise<{ base64Data: string; mimeType: string }> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawResult = (e.target?.result as string) || '';
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIMENSION = 1800;
+          let width = img.width;
+          let height = img.height;
+          if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIMENSION) / width);
+              width = MAX_DIMENSION;
+            } else {
+              width = Math.round((width * MAX_DIMENSION) / height);
+              height = MAX_DIMENSION;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.88);
+            resolve({ base64Data: optimizedBase64, mimeType: 'image/jpeg' });
+          } else {
+            resolve({ base64Data: rawResult, mimeType: file.type || 'image/jpeg' });
+          }
+        };
+        img.onerror = () => {
+          resolve({ base64Data: rawResult, mimeType: file.type || 'image/jpeg' });
+        };
+        img.src = rawResult;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   // Trigger real AI OCR extraction
   const processImageOcr = async (file: File) => {
     setIsOcrProcessing(true);
     setOcrSuccessNotice(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64Data = reader.result as string;
-        try {
-          const res = await fetch('/api/ocr-extract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageBase64: base64Data,
-              mimeType: file.type || 'image/jpeg',
-            }),
-          });
+      const { base64Data, mimeType } = await optimizeImageForOcr(file);
 
-          const data = await res.json();
-          if (data.success && data.extractedData) {
-            const ext = data.extractedData;
-            if (ext.weightKg !== undefined && ext.weightKg !== null) setWeightInput(ext.weightKg.toString());
-            if (ext.skeletalMuscleKg !== undefined && ext.skeletalMuscleKg !== null) setSmmInput(ext.skeletalMuscleKg.toString());
-            if (ext.bodyFatKg !== undefined && ext.bodyFatKg !== null) setBfmInput(ext.bodyFatKg.toString());
-            if (ext.percentBodyFat !== undefined && ext.percentBodyFat !== null) setPbfInput(ext.percentBodyFat.toString());
-            if (ext.bmi !== undefined && ext.bmi !== null) setBmiInput(ext.bmi.toString());
-            if (ext.waistHipRatio !== undefined && ext.waistHipRatio !== null) setWhrInput(ext.waistHipRatio.toString());
-            if (ext.visceralFatLevel !== undefined && ext.visceralFatLevel !== null) setVisceralFatInput(ext.visceralFatLevel.toString());
-            if (ext.basalMetabolismKcal !== undefined && ext.basalMetabolismKcal !== null) setBmrInput(ext.basalMetabolismKcal.toString());
-            if (ext.fitnessScore !== undefined && ext.fitnessScore !== null) setFitnessScoreInput(ext.fitnessScore.toString());
-            if (ext.age !== undefined && ext.age !== null) setAgeInput(ext.age.toString());
-            if (ext.heightCm !== undefined && ext.heightCm !== null) setHeightInput(ext.heightCm.toString());
-            if (ext.gender) setGender(ext.gender);
-            if (ext.deviceModel) setDeviceModel(ext.deviceModel);
-            if (ext.testDate) setTestDate(ext.testDate);
+      try {
+        const res = await fetch('/api/ocr-extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: base64Data,
+            mimeType,
+          }),
+        });
 
-            setOcrConfidence(data.confidence || 98.6);
-            setOcrModel(data.model || 'Gemini 3.1 Flash Vision OCR');
-            const recognizedWeight = ext.weightKg !== undefined ? ext.weightKg : (parseFloat(weightInput) || 75.5);
-            setOcrSuccessNotice(`AI OCR 수치 추출 완료: 체중 ${recognizedWeight}kg 및 검사지 데이터가 자동 입력되었습니다.`);
-          } else {
-            setOcrSuccessNotice('결과지 이미지가 등록되었습니다. 수치를 확인하시고 필요시 직접 수정하실 수 있습니다.');
-          }
-        } catch (apiErr) {
-          console.warn('API error during OCR extraction:', apiErr);
-          setOcrSuccessNotice('OCR 분석 결과를 확인 중입니다. 수치를 직접 입력창에서 확인하거나 수정할 수 있습니다.');
-        } finally {
-          setIsOcrProcessing(false);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: `서버 응답 오류 (HTTP ${res.status})` }));
+          throw new Error(errData?.error || `서버 응답 실패 (${res.status})`);
         }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
+
+        const data = await res.json();
+        if (data.success && data.extractedData) {
+          const ext = data.extractedData;
+          if (ext.weightKg !== undefined && ext.weightKg !== null) setWeightInput(ext.weightKg.toString());
+          if (ext.skeletalMuscleKg !== undefined && ext.skeletalMuscleKg !== null) setSmmInput(ext.skeletalMuscleKg.toString());
+          if (ext.bodyFatKg !== undefined && ext.bodyFatKg !== null) setBfmInput(ext.bodyFatKg.toString());
+          if (ext.percentBodyFat !== undefined && ext.percentBodyFat !== null) setPbfInput(ext.percentBodyFat.toString());
+          if (ext.bmi !== undefined && ext.bmi !== null) setBmiInput(ext.bmi.toString());
+          if (ext.waistHipRatio !== undefined && ext.waistHipRatio !== null) setWhrInput(ext.waistHipRatio.toString());
+          if (ext.visceralFatLevel !== undefined && ext.visceralFatLevel !== null) setVisceralFatInput(ext.visceralFatLevel.toString());
+          if (ext.basalMetabolismKcal !== undefined && ext.basalMetabolismKcal !== null) setBmrInput(ext.basalMetabolismKcal.toString());
+          if (ext.fitnessScore !== undefined && ext.fitnessScore !== null) setFitnessScoreInput(ext.fitnessScore.toString());
+          if (ext.age !== undefined && ext.age !== null) setAgeInput(ext.age.toString());
+          if (ext.heightCm !== undefined && ext.heightCm !== null) setHeightInput(ext.heightCm.toString());
+          if (ext.gender) setGender(ext.gender);
+          if (ext.deviceModel) setDeviceModel(ext.deviceModel);
+          if (ext.testDate) setTestDate(ext.testDate);
+
+          setOcrConfidence(data.confidence || 98.6);
+          setOcrModel(data.model || 'Gemini Vision OCR');
+          const recognizedWeight = ext.weightKg !== undefined ? ext.weightKg : (parseFloat(weightInput) || 75.5);
+          setOcrSuccessNotice(`AI OCR 수치 추출 완료: 체중 ${recognizedWeight}kg 및 검사지 데이터가 자동 입력되었습니다.`);
+        } else {
+          setOcrSuccessNotice(data.error || '결과지 이미지가 등록되었습니다. 수치를 확인하시고 필요시 직접 수정하실 수 있습니다.');
+        }
+      } catch (apiErr: any) {
+        console.warn('API error during OCR extraction:', apiErr);
+        const msg = apiErr?.message || '';
+        if (msg.includes('GEMINI_API_KEY')) {
+          setOcrSuccessNotice('⚠️ Vercel 배포 환경: Settings → Environment Variables에 GEMINI_API_KEY를 등록해야 AI OCR이 동작합니다.');
+        } else {
+          setOcrSuccessNotice(`OCR 요청 실패: ${msg || '네트워크 상태나 서버리스 상태를 확인해 주세요.'}`);
+        }
+      } finally {
+        setIsOcrProcessing(false);
+      }
+    } catch (err: any) {
       console.error(err);
       setIsOcrProcessing(false);
     }
