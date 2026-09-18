@@ -23,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-['Space_Grotesk'] text-[19px] font-bold text-[#dae2fd] tracking-tight shrink-0">
-                InBody Track
+                인바디
               </span>
               <span className="font-['JetBrains_Mono'] text-[10px] font-semibold text-[#4edea3] uppercase shrink-0 bg-[#00a572]/20 px-1.5 py-0.5 rounded border border-[#00a572]/30">
                 JSON DB
