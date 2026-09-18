@@ -1,0 +1,6 @@
+{
+  "name": "InBody Track",
+  "description": "인바디 결과지 이미지 AI OCR 추출, 항목별 검수, JSON 기록 및 일별·월별·년별 체성분 관리 시스템",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
